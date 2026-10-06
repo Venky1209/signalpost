@@ -1,8 +1,8 @@
 {
-  "run_id": "smoke-002",
-  "started_at": "2026-10-06T14:26:41.600638Z",
-  "completed_at": "2026-10-06T14:32:00.983651Z",
-  "wall_seconds": 319.5,
+  "run_id": "smoke-003",
+  "started_at": "2026-10-06T17:10:41.043969Z",
+  "completed_at": "2026-10-06T17:16:18.780064Z",
+  "wall_seconds": 337.9,
   "expected_count": 100,
   "emitted_envelopes": 100,
   "resumed_profiles": 0,
@@ -27,28 +27,28 @@
     "selected": 100
   },
   "operations": {
-    "requests": 703,
-    "bytes": 21631522,
-    "p50_ms": 734,
-    "p95_ms": 2828
+    "requests": 733,
+    "bytes": 23731376,
+    "p50_ms": 750,
+    "p95_ms": 2813
   },
   "third_party_cost_usd": 0,
   "coverage": {
     "financials": 100,
     "roles": 100,
-    "website_loaded": 12,
-    "website_exact_identity": 8,
+    "website_loaded": 13,
+    "website_exact_identity": 9,
     "social_profile_companies": 3,
     "social_profiles": 8,
     "hiring_companies": 1,
-    "discovered_sites": 6,
-    "news_companies": 3,
-    "news_items": 9
+    "discovered_sites": 7,
+    "news_companies": 4,
+    "news_items": 12
   },
   "nav_vacancy_feed": {
     "enabled": true,
     "feed_pages": 95,
-    "active_vacancies_seen": 9128,
+    "active_vacancies_seen": 9159,
     "companies_with_vacancies": 0,
     "vacancies": 0,
     "error": null
