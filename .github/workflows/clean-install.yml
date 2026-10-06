@@ -1,0 +1,27 @@
+name: clean-install
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install from the lockfile only
+        run: uv sync --frozen
+      - name: Tests
+        run: uv run --with pytest pytest -q
+      - name: One-command run on three companies
+        run: >
+          uv run python scripts/run_competition_batch.py
+          --organisations tests/fixtures/mini-orgs.jsonl --bulk tests/fixtures/mini-bulk.csv.gz
+          --profiles-output out/profiles.jsonl --output out/envelopes.jsonl
+          --report out/run-report.json --run-id ci --expected-count 3
+      - name: Second run reports no false changes
+        run: >
+          uv run python scripts/run_competition_batch.py
+          --organisations tests/fixtures/mini-orgs.jsonl --bulk tests/fixtures/mini-bulk.csv.gz
+          --profiles-output out/profiles.jsonl --output out/envelopes.jsonl
+          --report out/run-report.json --run-id ci-2 --expected-count 3
