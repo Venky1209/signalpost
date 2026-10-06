@@ -57,8 +57,8 @@ Inside `profile`:
 ## Models, APIs, licences, cost
 
 - No language model and no paid API. No secrets. Third-party cost per official run: **$0**.
-- Sources: Brønnøysund open data (NLOD 2.0) and company-owned websites (robots.txt honoured,
-  identifying User-Agent, one robots read per host).
+- Sources: Brønnøysund open data (NLOD 2.0) and company-owned websites (robots.txt honoured, one
+  robots read per host, the reference kit's User-Agent; override with `SIGNALPOST_USER_AGENT`).
 - Not used: LinkedIn, Meta, Indeed, Glassdoor, Google or any search engine. The optional example
   scripts from the reference kit that touch those services are not imported by the official command.
 - Roughly six requests per company. Local runs: 200 companies in about 2.5 minutes with 16 workers.
@@ -69,6 +69,8 @@ Inside `profile`:
 uv run --with pytest pytest -q
 ```
 
+- `.github/workflows/clean-install.yml`: on every push, a Linux runner installs from the lockfile,
+  runs the tests and runs the one command twice on three companies.
 - `reports/smoke-100/`: a 100-company run from the public universe — envelopes, run report and a built viewer (`site/index.html`).
 - Two consecutive runs over the same retained inputs produce identical records apart from timestamps.
 
