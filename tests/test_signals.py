@@ -89,6 +89,34 @@ class DatedNewsTests(unittest.TestCase):
         )
         self.assertEqual(signals.feed_links("https://firma.no/", page), ["https://firma.no/feed/"])
 
+    def test_sitemap_supplies_careers_and_articles_but_not_staff_pages(self):
+        index = (
+            b'<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            b"<sitemap><loc>https://firma.no/wp-sitemap-posts-post-1.xml</loc></sitemap>"
+            b"<sitemap><loc>https://firma.no/wp-sitemap-posts-ansatte-1.xml</loc></sitemap>"
+            b"<sitemap><loc>https://firma.no/wp-sitemap-posts-page-1.xml</loc></sitemap>"
+            b"<sitemap><loc>https://annet.no/sitemap.xml</loc></sitemap></sitemapindex>"
+        )
+        children, entries = signals.parse_sitemap("https://firma.no/wp-sitemap.xml", index)
+        self.assertEqual(entries, [])
+        self.assertEqual(signals.post_like_sitemaps(children)[0], "https://firma.no/wp-sitemap-posts-post-1.xml")
+        self.assertFalse(signals.is_post_sitemap("https://firma.no/wp-sitemap-posts-ansatte-1.xml"))
+        pages = (
+            b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            b"<url><loc>https://firma.no/karriere/</loc><lastmod>2026-01-01</lastmod></url>"
+            b"<url><loc>https://firma.no/nyheter/ny-avtale/</loc><lastmod>2026-05-02T10:00:00+02:00</lastmod></url>"
+            b"<url><loc>https://firma.no/ansatte/ola-nordmann/</loc><lastmod>2026-06-01</lastmod></url>"
+            b"<url><loc>https://firma.no/produkter/</loc></url></urlset>"
+        )
+        _, entries = signals.parse_sitemap("https://firma.no/sitemap.xml", pages)
+        self.assertEqual(signals.sitemap_career_urls(entries), ["https://firma.no/karriere/"])
+        self.assertEqual([item["url"] for item in signals.sitemap_article_urls(entries, from_post_sitemap=False)], ["https://firma.no/nyheter/ny-avtale/"])
+        self.assertNotIn("https://firma.no/ansatte/ola-nordmann/", [item["url"] for item in signals.sitemap_article_urls(entries, from_post_sitemap=True)])
+
+    def test_proof_links_prefer_contact_about_and_privacy_pages(self):
+        page = soup('<a href="/produkter">Produkter</a><a href="/personvern">Personvern</a><a href="/kontakt-oss">Kontakt</a><a href="https://annet.no/kontakt">x</a>')
+        self.assertEqual(signals.proof_links("https://firma.no/", page), ["https://firma.no/kontakt-oss", "https://firma.no/personvern"])
+
     def test_window_rejects_old_and_future_items(self):
         now = datetime(2026, 10, 6, tzinfo=timezone.utc)
         self.assertTrue(signals.within_days("2025-09-22T20:00:00+02:00", now, 1095))

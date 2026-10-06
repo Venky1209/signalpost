@@ -346,3 +346,110 @@ def within_days(published_at: str, reference: datetime, days: int) -> bool:
         parsed = parsed.replace(tzinfo=timezone.utc)
     age = (reference - parsed).total_seconds() / 86400
     return -2 <= age <= days
+
+
+PROOF_TERMS = (
+    "kontakt", "contact", "om-oss", "om_oss", "omoss", "about", "personvern", "privacy", "vilkar", "vilkår",
+    "betingelser", "terms", "salgsbetingelser", "kjopsbetingelser", "kjøpsbetingelser", "impressum", "firmainfo",
+)
+POST_SITEMAP_HINTS = ("post", "news", "nyhet", "aktuelt", "artik", "blog", "press")
+# Dated pages that are not news: staff profiles, products, taxonomy and author archives.
+NON_ARTICLE_TOKENS = {
+    "ansatte", "ansatt", "medarbeidere", "medarbeider", "team", "people", "employees", "staff", "author", "forfatter",
+    "produkt", "produkter", "product", "products", "kategori", "category", "tag", "tags", "butikk", "shop", "tjenester",
+    "services", "prosjekter", "prosjekt", "projects", "referanser", "kunder", "stillinger", "jobb", "karriere",
+}
+
+
+def is_post_sitemap(url: str) -> bool:
+    """True for a child sitemap of blog or news posts; WordPress `posts-<type>` maps count only for type `post`."""
+    name = urllib.parse.urlparse(url).path.casefold()
+    typed = re.search(r"posts-([a-z0-9_]+)-\d+\.xml", name)
+    if typed:
+        return typed.group(1) == "post"
+    return any(hint in name for hint in POST_SITEMAP_HINTS)
+
+
+def proof_links(base_url: str, soup: BeautifulSoup) -> list[str]:
+    """Same-site pages that usually state who runs the site: contact, about, privacy and terms."""
+    site = registered_domain(base_url)
+    ranked: dict[str, tuple[int, int, str]] = {}
+    for url, text in _anchors(base_url, soup):
+        parsed = urllib.parse.urlparse(url)
+        if registered_domain(url) != site or len([part for part in parsed.path.split("/") if part]) > 2:
+            continue
+        haystack = urllib.parse.unquote(parsed.path).casefold() + " " + text.casefold()
+        rank = next((index for index, term in enumerate(PROOF_TERMS) if term in haystack), None)
+        if rank is None:
+            continue
+        key = (rank, len(parsed.path), url)
+        if url not in ranked or key < ranked[url]:
+            ranked[url] = key
+    return [url for _, _, url in sorted(ranked.values())]
+
+
+def parse_sitemap(sitemap_url: str, body: bytes) -> tuple[list[str], list[dict[str, str]]]:
+    """Return (child sitemap URLs, page entries) from a sitemap or sitemap index, same site only."""
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return [], []
+    site = registered_domain(sitemap_url)
+    children: list[str] = []
+    entries: dict[str, dict[str, str]] = {}
+    for node in root.iter():
+        kind = _local(node.tag)
+        if kind not in {"sitemap", "url"}:
+            continue
+        location = lastmod = ""
+        for child in node:
+            name = _local(child.tag)
+            if name == "loc":
+                location = (child.text or "").strip()
+            elif name == "lastmod":
+                lastmod = (child.text or "").strip()
+        if not location or registered_domain(location) != site:
+            continue
+        if kind == "sitemap":
+            children.append(location)
+        else:
+            entries.setdefault(clean_url(location), {"url": clean_url(location), "lastmod": normalize_datetime(lastmod) or ""})
+    return sorted(set(children)), [entries[key] for key in sorted(entries)]
+
+
+def post_like_sitemaps(children: list[str]) -> list[str]:
+    """Child sitemaps most likely to list dated posts, best first, then the rest."""
+    def rank(url: str) -> tuple[int, str]:
+        return (0 if is_post_sitemap(url) else 1, url)
+
+    return sorted(children, key=rank)
+
+
+def sitemap_career_urls(entries: list[dict[str, str]]) -> list[str]:
+    ranked = []
+    for entry in entries:
+        parsed = urllib.parse.urlparse(entry["url"])
+        parts = [part for part in parsed.path.split("/") if part]
+        tokens = set(_path_tokens(parsed.path))
+        path = parsed.path.casefold()
+        if not parts or len(parts) > 2 or tokens & NEWS_TOKENS:
+            continue
+        if tokens & CAREER_TOKENS or any(phrase in path for phrase in CAREER_PHRASES):
+            ranked.append((len(parts), len(parsed.path), entry["url"]))
+    return [url for _, _, url in sorted(ranked)[:3]]
+
+
+def sitemap_article_urls(entries: list[dict[str, str]], *, from_post_sitemap: bool) -> list[dict[str, str]]:
+    """Dated article candidates: entries with a lastmod that sit under a news path, or come from a post sitemap."""
+    found = []
+    for entry in entries:
+        if not entry["lastmod"]:
+            continue
+        parsed = urllib.parse.urlparse(entry["url"])
+        parts = [part for part in parsed.path.split("/") if part]
+        tokens = set(_path_tokens(parsed.path))
+        under_news = bool(tokens & NEWS_TOKENS) and len(parts) >= 2
+        if not parts or not (under_news or from_post_sitemap) or tokens & NON_ARTICLE_TOKENS:
+            continue
+        found.append({"url": entry["url"], "title": "", "published_at": entry["lastmod"]})
+    return sorted(found, key=lambda item: (datetime_sort_key(item["published_at"]), item["url"]), reverse=True)

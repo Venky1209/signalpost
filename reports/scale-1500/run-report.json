@@ -1,8 +1,8 @@
 {
-  "run_id": "scale-004",
-  "started_at": "2026-10-06T14:18:28.183929Z",
-  "completed_at": "2026-10-06T14:22:52.844884Z",
-  "wall_seconds": 266.5,
+  "run_id": "scale-006",
+  "started_at": "2026-10-06T14:55:08.501139Z",
+  "completed_at": "2026-10-06T14:58:55.592496Z",
+  "wall_seconds": 228.8,
   "expected_count": 1500,
   "emitted_envelopes": 1500,
   "resumed_profiles": 0,
@@ -27,8 +27,8 @@
     "selected": 1500
   },
   "operations": {
-    "requests": 10421,
-    "bytes": 261442812,
+    "requests": 10825,
+    "bytes": 280168571,
     "p50_ms": 1281,
     "p95_ms": 2344
   },
@@ -36,14 +36,14 @@
   "coverage": {
     "financials": 1498,
     "roles": 1500,
-    "website_loaded": 241,
-    "website_exact_identity": 168,
+    "website_loaded": 242,
+    "website_exact_identity": 169,
     "social_profile_companies": 83,
     "social_profiles": 155,
-    "hiring_companies": 27,
-    "discovered_sites": 99,
-    "news_companies": 36,
-    "news_items": 101
+    "hiring_companies": 29,
+    "discovered_sites": 100,
+    "news_companies": 40,
+    "news_items": 113
   },
   "nav_vacancy_feed": {
     "enabled": true,

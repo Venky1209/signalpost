@@ -23,7 +23,7 @@ from norway_company_agent.official import fetch_official_modules  # noqa: E402
 from norway_company_agent.refresh import diff_profile  # noqa: E402
 from norway_company_agent.nav_jobs import SOURCE as NAV_SOURCE, NavIndex, company_keys  # noqa: E402
 from norway_company_agent.site_discovery import NAME_SOURCE_TYPE as NAME_DISCOVERY_SOURCE, SOURCE_TYPE as DISCOVERY_SOURCE, discovered_site_problem, email_domain_candidate, entity_proof, name_domain_candidates, redirect_problem, registered_domain  # noqa: E402
-from norway_company_agent.site_signals import hiring_record, news_record, unverified_site_records  # noqa: E402
+from norway_company_agent.site_signals import hiring_record, news_record, read_proof_pages, unverified_site_records  # noqa: E402
 from norway_company_agent.website import crawl_site, normalize_homepage  # noqa: E402
 
 DEFAULT_MODULES = "registry,accounting_obligation,registry_live,financials,roles,group,locations,website,hiring,news"
@@ -104,6 +104,9 @@ def research_site(profile: dict, requested: list[str], run_date: datetime, crawl
         for domain, method, source_type in candidates:
             candidate = crawl_site(domain, source_type=source_type)
             proof = entity_proof(profile, candidate.pages) if candidate.pages else None
+            homepage_text = str((candidate.record.get("value") or {}).get("main_text_excerpt") or "")
+            if not proof and candidate.pages and len(homepage_text.strip()) >= 150 and read_proof_pages(candidate):
+                proof = entity_proof(profile, candidate.pages)
             gated = gate_site(profile, candidate.record, domain, discovered=True, proof=proof)
             candidate_identity = (gated.get("value") or {}).get("identity_assessment") or {}
             outcome = {"method": method, "candidate": domain, "accepted": False}

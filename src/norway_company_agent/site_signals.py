@@ -9,12 +9,14 @@ from bs4 import BeautifulSoup
 
 from . import signals
 from .evidence import evidence, utc_now
-from .net import Response, fetch, robots_allowed
+from .net import Response, fetch, robots_allowed, robots_sitemaps
 from .website import SiteCrawl
 
 HIRING_SOURCE = "company_owned_careers_page"
 NEWS_SOURCE = "company_owned_news"
 MAX_CAREER_TRIES = 2
+MAX_PROOF_PAGES = 3
+MAX_SITEMAP_FETCHES = 3
 MAX_ARTICLES = 3
 NEWS_WINDOW_DAYS = 1095
 
@@ -38,6 +40,55 @@ def _get_page(crawl: SiteCrawl, url: str, site_domain: str, timeout: float) -> P
     page = (response, html, BeautifulSoup(html, "lxml"))
     crawl.pages[response.final_url] = page
     return page
+
+
+def read_proof_pages(crawl: SiteCrawl, *, timeout: float = 12.0) -> int:
+    """Fetch a few contact, about, privacy or terms pages linked from the homepage; returns how many were added."""
+    if not crawl.pages:
+        return 0
+    homepage = next(iter(crawl.pages.values()))
+    site_domain = signals.registered_domain(homepage[0].final_url)
+    known = {signals.clean_url(url).rstrip("/") for url in crawl.pages}
+    added = 0
+    for url in signals.proof_links(homepage[0].final_url, homepage[2]):
+        if added >= MAX_PROOF_PAGES:
+            break
+        if signals.clean_url(url).rstrip("/") in known:
+            continue
+        known.add(signals.clean_url(url).rstrip("/"))
+        if _get_page(crawl, url, site_domain, timeout) is not None:
+            added += 1
+    return added
+
+
+def site_sitemap(crawl: SiteCrawl, site_domain: str, timeout: float) -> dict[str, Any]:
+    """Read the site's sitemap once: entries from the page sitemap and from the first post-like child."""
+    if crawl.sitemap is not None:
+        return crawl.sitemap
+    crawl.sitemap = {"entries": [], "post_entries": []}
+    homepage_url = next(iter(crawl.pages.values()))[0].final_url
+    parsed = urllib.parse.urlparse(homepage_url)
+    origin = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
+    declared = [url for url in robots_sitemaps(homepage_url, timeout=timeout) if signals.registered_domain(url) == site_domain]
+    queue = [(url, False) for url in (declared[:2] or [origin + "/sitemap.xml"])]
+    fetched = 0
+    seen: set[str] = set()
+    while queue and fetched < MAX_SITEMAP_FETCHES:
+        url, post_like = queue.pop(0)
+        if url in seen or not robots_allowed(url, timeout=timeout):
+            continue
+        seen.add(url)
+        response = fetch(url, accept="application/xml,text/xml;q=0.9,*/*;q=0.5", timeout=timeout, max_bytes=3_000_000)
+        fetched += 1
+        if not response.ok or signals.registered_domain(response.final_url) != site_domain:
+            continue
+        children, entries = signals.parse_sitemap(response.final_url, response.body)
+        crawl.sitemap["post_entries" if post_like else "entries"].extend(entries[:3000])
+        ordered = signals.post_like_sitemaps(children)
+        hinted = [child for child in ordered if signals.is_post_sitemap(child)]
+        plain = [child for child in ordered if child not in hinted]
+        queue = [(child, True) for child in hinted[:1]] + [(child, False) for child in plain[:1]] + queue
+    return crawl.sitemap
 
 
 def _job_postings(page_url: str, soup: BeautifulSoup) -> list[dict[str, Any]]:
@@ -81,6 +132,9 @@ def hiring_record(crawl: SiteCrawl, *, timeout: float = 12.0) -> dict[str, Any]:
     found: list[dict[str, Any]] = []
     postings: list[dict[str, Any]] = []
     tries = 0
+    if not any(candidate["kind"] == "company_site" for candidate, _ in candidates):
+        entries = site_sitemap(crawl, site_domain, timeout)["entries"]
+        candidates = [({"url": url, "kind": "company_site"}, homepage_url) for url in signals.sitemap_career_urls(entries)] + candidates
     for candidate, _linked_from in candidates:
         if candidate["kind"] != "company_site" or tries >= MAX_CAREER_TRIES:
             continue
@@ -160,6 +214,10 @@ def _candidate_items(crawl: SiteCrawl, site_domain: str, timeout: float) -> tupl
                 continue
             for item in signals.listing_items(page[0].final_url, page[2]):
                 items.setdefault(item["url"], item)
+    if not items:
+        sitemap = site_sitemap(crawl, site_domain, timeout)
+        for item in signals.sitemap_article_urls(sitemap["post_entries"], from_post_sitemap=True) + signals.sitemap_article_urls(sitemap["entries"], from_post_sitemap=False):
+            items.setdefault(item["url"], item)
     ordered = sorted(items.values(), key=lambda item: (signals.datetime_sort_key(item["published_at"]), item["url"]), reverse=True)
     return ordered, None
 

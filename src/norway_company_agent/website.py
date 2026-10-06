@@ -213,6 +213,7 @@ class SiteCrawl:
 
     record: dict[str, Any]
     pages: dict[str, tuple[Response, str, BeautifulSoup]] = field(default_factory=dict)
+    sitemap: dict[str, Any] | None = None
 
 
 def _homepage_candidates(supplied_url: str, normalized: str) -> list[str]:

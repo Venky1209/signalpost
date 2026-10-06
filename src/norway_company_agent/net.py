@@ -242,3 +242,15 @@ def robots_allowed(url: str, *, timeout: float = 10.0) -> bool:
         return parser.can_fetch(USER_AGENT, url)
     except Exception:
         return True
+
+
+def robots_sitemaps(url: str, *, timeout: float = 10.0) -> list[str]:
+    """Sitemap URLs the site declares in robots.txt (read once per host, shared with `robots_allowed`)."""
+    robots_allowed(url, timeout=timeout)
+    parsed = urllib.parse.urlparse(url)
+    with _robots_lock:
+        parser = _robots.get(f"{parsed.scheme}://{parsed.netloc.lower()}")
+    try:
+        return sorted(parser.site_maps() or []) if parser is not None else []
+    except Exception:
+        return []
