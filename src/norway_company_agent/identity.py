@@ -21,6 +21,12 @@ def _tokens(value: Any) -> list[str]:
     return [token for token in re.findall(r"[a-z0-9]+", text) if token not in LEGAL_AND_GENERIC and len(token) > 1]
 
 
+def _compact(value: Any) -> str:
+    text = str(value or "").translate(str.maketrans({"ø": "o", "Ø": "O", "å": "a", "Å": "A", "æ": "ae", "Æ": "AE"}))
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().casefold()
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
 def _structured_names(value: Any) -> list[str]:
     names: list[str] = []
     if isinstance(value, dict):
@@ -76,7 +82,7 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
     core_compact = "".join(core)
     compact_homepage_name = bool(
         len(core) >= 2 and len(core_compact) >= 9
-        and any(core_compact in "".join(_tokens(part)) for part in homepage_identity_parts if part)
+        and any(core_compact in _compact(part) for part in homepage_identity_parts if part)
     )
     is_business_sports_club = bool(re.search(r"(?:^|\s)B\.?\s*I\.?\s*L\.?(?:\s|$)", str(profile.get("name") or ""), re.I))
     if any(marker in normalized_raw for marker in parked_markers):

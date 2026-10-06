@@ -9,3 +9,4 @@ signalpost-universe.jsonl.gz
 *.tmp
 reports/**/profiles.jsonl
 reports/**/*.before-*
+.claude/
