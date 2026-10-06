@@ -55,7 +55,7 @@ def read_organisation_numbers(path: str | Path) -> list[str]:
     return [record["organisation_number"] for record in read_organisation_inputs(path)]
 
 
-def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str], *, strict: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     requested = list(organisation_numbers)
     wanted = set(requested)
     snapshot_sha256 = hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -85,9 +85,26 @@ def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str]) ->
         if len(found) == len(wanted):
             break
     missing = [org for org in requested if org not in found]
-    if missing:
+    if missing and strict:
         raise ValueError(f"Organisation numbers absent from registry snapshot: {missing[:10]}")
+    for org in missing:
+        # Deleted or newer than the snapshot: keep the input and let the live registry answer.
+        found[org] = {
+            "organisation_number": org, "name": "", "legal_form": "", "employees": None, "bankrupt": False,
+            "liquidating": False, "municipality": "", "municipality_number": "", "industry_code": "",
+            "industry_label": "", "website": "", "latest_submitted_accounts": "",
+            "evidence": {
+                "registry": evidence(
+                    "registry", "not_found", "official_registry_bulk",
+                    "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv",
+                    note="Organisation number is absent from the registry snapshot",
+                    retrieved_at=retrieved_at, content_sha256=snapshot_sha256, source_row_key=org,
+                ),
+            },
+        }
+        found[org]["evidence"]["accounting_obligation"] = accounting_obligation_assessment(found[org])
     return [found[org] for org in requested], {
+        "absent_from_snapshot": missing,
         "registry_snapshot_sha256": snapshot_sha256,
         "registry_rows_scanned": scanned,
         "requested": len(requested),

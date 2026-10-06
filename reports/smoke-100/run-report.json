@@ -1,0 +1,64 @@
+{
+  "run_id": "smoke-001",
+  "started_at": "2026-10-06T09:34:05.745333Z",
+  "completed_at": "2026-10-06T09:37:07.592380Z",
+  "wall_seconds": 182.0,
+  "expected_count": 100,
+  "emitted_envelopes": 100,
+  "resumed_profiles": 0,
+  "profiles_fetched_this_run": 100,
+  "modules": [
+    "registry",
+    "accounting_obligation",
+    "registry_live",
+    "financials",
+    "roles",
+    "group",
+    "locations",
+    "website",
+    "hiring",
+    "news"
+  ],
+  "registry": {
+    "absent_from_snapshot": [],
+    "registry_snapshot_sha256": "8483831efe73d873460e4c6765c98f46a1937a59b763c074ea32a6d2e657bc70",
+    "registry_rows_scanned": 1172258,
+    "requested": 100,
+    "selected": 100
+  },
+  "operations": {
+    "requests": 591,
+    "bytes": 6074221,
+    "p50_ms": 1234,
+    "p95_ms": 2265
+  },
+  "third_party_cost_usd": 0,
+  "coverage": {
+    "financials": 100,
+    "roles": 100,
+    "website_loaded": 8,
+    "website_exact_identity": 4,
+    "social_profile_companies": 0,
+    "social_profiles": 0,
+    "hiring_companies": 0,
+    "news_companies": 0,
+    "news_items": 0
+  },
+  "refresh": {
+    "compared_with": null,
+    "companies_compared": 0,
+    "changes": 0
+  },
+  "entrant_errors": 0,
+  "validation": {
+    "passed": true,
+    "checks": {
+      "exact_expected_count": true,
+      "unique_organisation_numbers": true,
+      "all_entity_states_terminal": true,
+      "all_module_states_terminal": true,
+      "zero_silent_drops": true
+    },
+    "invalid_states": []
+  }
+}

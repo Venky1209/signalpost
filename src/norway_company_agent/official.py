@@ -153,6 +153,15 @@ def normalize_locations(body: Any) -> dict[str, Any]:
     } for item in rows]}
 
 
+def _email_domain(value: Any) -> str | None:
+    """Only the domain is kept; the mailbox itself is not needed for research."""
+    text = str(value or "").strip().lower()
+    if text.count("@") != 1:
+        return None
+    domain = text.rsplit("@", 1)[1].strip(". ")
+    return domain if "." in domain and " " not in domain else None
+
+
 def normalize_entity(body: Any) -> dict[str, Any]:
     body = body if isinstance(body, dict) else {}
     return {
@@ -167,6 +176,12 @@ def normalize_entity(body: Any) -> dict[str, Any]:
         "business_address": body.get("forretningsadresse"),
         "postal_address": body.get("postadresse"),
         "latest_submitted_accounts": body.get("sisteInnsendteAarsregnskap"),
+        "activity": " ".join(str(line) for line in body.get("aktivitet") or []).strip() or None,
+        "statutory_purpose": " ".join(str(line) for line in body.get("vedtektsfestetFormaal") or []).strip() or None,
+        "founded": body.get("stiftelsesdato"),
+        "email_domain": _email_domain(body.get("epostadresse")),
+        "phone": body.get("telefon") or body.get("mobil"),
+        "in_group": body.get("erIKonsern"),
     }
 
 

@@ -17,6 +17,15 @@ TRACKED_FIELDS: dict[str, tuple[str, ...]] = {
     "website.title": ("evidence", "website", "value", "title"),
     "website.description": ("evidence", "website", "value", "description"),
     "website.social_links": ("evidence", "website", "value", "social_links"),
+    "hiring.signals": ("evidence", "hiring", "value", "signals"),
+    "hiring.job_postings": ("evidence", "hiring", "value", "job_postings"),
+    "news.items": ("evidence", "news", "value", "items"),
+}
+# Compare the published fact, not its retrieval metadata, so an unchanged source is never a change.
+PROJECTIONS = {
+    "hiring.signals": lambda rows: sorted(str(row.get("url")) for row in rows or []),
+    "hiring.job_postings": lambda rows: sorted(f"{row.get('url')}|{row.get('title')}" for row in rows or []),
+    "news.items": lambda rows: sorted(str(row.get("value")) for row in rows or []),
 }
 
 
@@ -45,6 +54,8 @@ def diff_profile(previous: dict[str, Any], current: dict[str, Any]) -> list[dict
     for field, path in TRACKED_FIELDS.items():
         old_value = _read(previous, path)
         new_value = _read(current, path)
+        if field in PROJECTIONS:
+            old_value, new_value = PROJECTIONS[field](old_value), PROJECTIONS[field](new_value)
         if old_value == new_value:
             continue
         record = _evidence_for(current, field)

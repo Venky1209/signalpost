@@ -27,7 +27,7 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def fetch_json(url: str, *, timeout: float = 20.0, attempts: int = 3) -> FetchResult:
+def fetch_json(url: str, *, timeout: float = 20.0, attempts: int = 5) -> FetchResult:
     last_error = "request failed"
     for attempt in range(attempts):
         started = time.monotonic()
@@ -46,6 +46,12 @@ def fetch_json(url: str, *, timeout: float = 20.0, attempts: int = 3) -> FetchRe
             if exc.code in {404, 410}:
                 return FetchResult(url, exc.code, elapsed, len(raw), error=f"HTTP {exc.code}", content_sha256=hashlib.sha256(raw).hexdigest(), retrieved_at=_utc_now())
             last_error = f"HTTP {exc.code}"
+            if exc.code == 429:
+                # Rate limited: wait as asked (bounded) so the company keeps its official record.
+                try:
+                    time.sleep(min(15.0, float(exc.headers.get("Retry-After") or 2.0)))
+                except (TypeError, ValueError):
+                    time.sleep(2.0)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             last_error = type(exc).__name__
         if attempt + 1 < attempts:

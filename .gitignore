@@ -7,3 +7,5 @@ brreg-*.csv*
 signalpost-universe.jsonl.gz
 .env
 *.tmp
+reports/**/profiles.jsonl
+reports/**/*.before-*

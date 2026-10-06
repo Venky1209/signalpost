@@ -12,6 +12,9 @@ LEGAL_AND_GENERIC = {
 }
 
 
+GENERIC_DOMAIN_LABELS = {"norge", "norway", "group", "gruppen", "holding", "invest", "eiendom", "consulting", "service", "services"}
+
+
 def _tokens(value: Any) -> list[str]:
     text = str(value or "").translate(str.maketrans({"ø": "o", "Ø": "O", "å": "a", "Å": "A", "æ": "ae", "Æ": "AE"}))
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().casefold()
@@ -69,6 +72,12 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
     homepage_token_sets = [set(_tokens(part)) for part in homepage_identity_parts if part]
     exact_homepage_name = bool(core and any(set(core).issubset(tokens) for tokens in homepage_token_sets))
     substantive_homepage = len(str(value.get("main_text_excerpt") or "").strip()) >= 100
+    # Same name written with different punctuation or joined, e.g. "Afrodite`s Skjønnhet" or a hostname.
+    core_compact = "".join(core)
+    compact_homepage_name = bool(
+        len(core) >= 2 and len(core_compact) >= 9
+        and any(core_compact in "".join(_tokens(part)) for part in homepage_identity_parts if part)
+    )
     is_business_sports_club = bool(re.search(r"(?:^|\s)B\.?\s*I\.?\s*L\.?(?:\s|$)", str(profile.get("name") or ""), re.I))
     if any(marker in normalized_raw for marker in parked_markers):
         score = 0.1
@@ -85,6 +94,9 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
     elif len(core) == 1 and exact_homepage_name and substantive_homepage:
         score = 0.95
         reasons.append("single distinctive legal-name token appears in homepage identity evidence with substantive content")
+    elif compact_homepage_name:
+        score = 0.93
+        reasons.append("the full legal name, written without separators, appears in homepage identity evidence")
     elif ratio >= 0.75 and len(overlap) >= 2:
         score = 0.85
         reasons.append("most legal-name tokens appear, but exact identity is incomplete")
@@ -106,7 +118,7 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def assess_social_identity(profile: dict[str, Any], link: dict[str, str]) -> dict[str, Any]:
+def assess_social_identity(profile: dict[str, Any], link: dict[str, str], site_domain: str | None = None) -> dict[str, Any]:
     core = _tokens(profile.get("name"))
     parsed = urllib.parse.urlparse(link.get("url") or "")
     handle_text = urllib.parse.unquote(parsed.path)
@@ -114,6 +126,8 @@ def assess_social_identity(profile: dict[str, Any], link: dict[str, str]) -> dic
     matched = [token for token in core if token in handle_compact]
     core_compact = "".join(core)
     ratio = len(set(matched)) / len(set(core)) if core else 0.0
+    # The label of a site that already passed the exact-identity gate, e.g. "elopak" for elopak.com.
+    domain_label = "".join(_tokens(str(site_domain or "").split(".")[0]))
     if core_compact and core_compact in handle_compact:
         score = 0.98
         reason = "normalized legal-name sequence appears in the social handle"
@@ -123,6 +137,9 @@ def assess_social_identity(profile: dict[str, Any], link: dict[str, str]) -> dic
     elif ratio >= 0.75 and len(set(matched)) >= 2:
         score = 0.9
         reason = "most legal-name tokens appear in the social handle"
+    elif len(domain_label) >= 5 and domain_label in handle_compact and domain_label not in GENERIC_DOMAIN_LABELS:
+        score = 0.9
+        reason = "social handle carries the verified company site's domain label"
     else:
         score = 0.3
         reason = "social handle lacks strong exact-entity name evidence"
@@ -145,7 +162,8 @@ def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]
     value["identity_assessment"] = assessment
     original = list(value.get("discovered_social_links") or value.get("social_links") or [])
     value["discovered_social_links"] = original
-    social_assessments = [assess_social_identity(profile, link) for link in original]
+    site_domain = value.get("registered_domain") if assessment["publishable"] else None
+    social_assessments = [assess_social_identity(profile, link, site_domain) for link in original]
     value["social_link_assessments"] = social_assessments
     value["social_links"] = [
         {"platform": item["platform"], "url": item["url"]}
