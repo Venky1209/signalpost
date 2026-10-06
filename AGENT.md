@@ -51,7 +51,9 @@ Working assumptions (inferred from published text and the public board, not conf
 batch input ─► registry snapshot (identity anchor)
             ─► official modules: live entity, accounts, roles, group, workplaces
             ─► website: registry URL ─► homepage + priority pages ─► identity gate
-            │     └─ discovery when the registry has no URL (registry e-mail domain, org-number proof)
+            │     └─ discovery when the registry has no working URL:
+            │          registry e-mail domain (site must name the exact entity), then a .no domain spelled
+            │          like the legal name (site must show org number, registered phone, or postcode + place)
             ─► on an exact-identity site only:
             │     social profiles · hiring signal (careers page, vacancies) · dated news (article pages)
             ─► NAV vacancy feed matched on employer organisation number
@@ -66,6 +68,8 @@ batch input ─► registry snapshot (identity anchor)
 | Identity gate | `identity.py` | `exact` / `review` / `related_or_uncertain` |
 | Signal extractors | `signals.py` | pure parsing of careers links, feeds, listings, article dates |
 | Site signals | `site_signals.py` | `hiring` and `news` evidence records |
+| Site discovery | `site_discovery.py` | candidates only; never a fact without the gate and proof |
+| NAV vacancies | `nav_jobs.py` | vacancies whose employer organisation number matches |
 | Claims | `claims.py` | contract-shaped `claims` and `evidence` lists |
 | Brief | `brief.py` | cited summary, changes, unknowns |
 | Batch runner | `scripts/run_competition_batch.py` | envelopes, profiles, run report |

@@ -21,7 +21,8 @@ from norway_company_agent.evidence import evidence, utc_now  # noqa: E402
 from norway_company_agent.identity import apply_website_identity_gate  # noqa: E402
 from norway_company_agent.official import fetch_official_modules  # noqa: E402
 from norway_company_agent.refresh import diff_profile  # noqa: E402
-from norway_company_agent.site_discovery import SOURCE_TYPE as DISCOVERY_SOURCE, email_domain_candidate, registered_domain  # noqa: E402
+from norway_company_agent.nav_jobs import SOURCE as NAV_SOURCE, NavIndex, company_keys  # noqa: E402
+from norway_company_agent.site_discovery import NAME_SOURCE_TYPE as NAME_DISCOVERY_SOURCE, SOURCE_TYPE as DISCOVERY_SOURCE, email_domain_candidate, entity_proof, name_domain_candidates, registered_domain  # noqa: E402
 from norway_company_agent.site_signals import hiring_record, news_record, unverified_site_records  # noqa: E402
 from norway_company_agent.website import crawl_site, normalize_homepage  # noqa: E402
 
@@ -43,6 +44,23 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def merge_nav_postings(profile: dict, postings: list[dict]) -> None:
+    """Attach NAV vacancies to the hiring record; vacancies from an earlier pass are replaced, never duplicated."""
+    records = profile["evidence"]
+    hiring = records.get("hiring") or {}
+    value = hiring.get("value") or {}
+    own = [row for row in value.get("job_postings") or [] if row.get("source_class") != "official_public_feed"]
+    if hiring.get("status") == "available" and (value.get("signals") or own or postings):
+        hiring["value"] = {**value, "job_postings": own + postings}
+    elif postings:
+        records["hiring"] = evidence(
+            "hiring", "available", NAV_SOURCE, postings[0]["source_url"],
+            value={"signals": [], "job_postings": postings},
+            note="Open vacancy in NAV's public feed; the ad's employer organisation number equals this entity or one of its registered workplaces",
+            content_sha256=postings[0]["content_sha256"],
+        )
+
+
 def research_site(profile: dict, requested: list[str], run_date: datetime, crawl_allowed: bool) -> None:
     """Website, then hiring and news only when the site is tied to this exact legal entity."""
     records = profile["evidence"]
@@ -58,25 +76,49 @@ def research_site(profile: dict, requested: list[str], run_date: datetime, crawl
     records["website"] = apply_website_identity_gate(profile, crawl.record)["website"]
     website = records["website"]
     identity = (website.get("value") or {}).get("identity_assessment") or {}
-    if not (website.get("status") == "available" and identity.get("publishable")):
+
+    def exact(record: dict, assessment: dict) -> bool:
+        return record.get("status") == "available" and bool(assessment.get("publishable"))
+
+    if not exact(website, identity):
         tried = {registered_domain(urlparse(str((website.get("value") or {}).get("final_url") or normalize_homepage(url) or "")).hostname or "")}
-        domain = email_domain_candidate(profile, tried)
-        if domain:
-            candidate = crawl_site(domain, source_type=DISCOVERY_SOURCE)
+        attempts = []
+        email_domain = email_domain_candidate(profile, tried)
+        candidates = [(email_domain, "registry_email_domain", DISCOVERY_SOURCE)] if email_domain else []
+        candidates += [(domain, "legal_name_domain", NAME_DISCOVERY_SOURCE) for domain in name_domain_candidates(profile, tried | {email_domain or ""})]
+        for domain, method, source_type in candidates:
+            candidate = crawl_site(domain, source_type=source_type)
             gated = apply_website_identity_gate(profile, candidate.record)["website"]
             candidate_identity = (gated.get("value") or {}).get("identity_assessment") or {}
-            outcome = {"method": "registry_email_domain", "candidate": domain, "accepted": False, "registry_website": url or None, "registry_website_state": website.get("status")}
-            if gated.get("status") == "available" and candidate_identity.get("publishable"):
+            outcome = {"method": method, "candidate": domain, "accepted": False}
+            # A domain merely spelled like the legal name could be a namesake: the site itself must
+            # show this entity's organisation number or registered phone.
+            proof = entity_proof(profile, candidate.pages) if method == "legal_name_domain" and candidate.pages else None
+            if exact(gated, candidate_identity) and (method == "registry_email_domain" or proof):
                 outcome["accepted"] = True
-                gated["value"]["discovery"] = outcome
-                gated["note"] = "Found through the e-mail domain the entity registered in Brønnøysund; published only because the site names this exact legal entity"
+                if proof:
+                    outcome["proof"] = proof
+                    candidate_identity["reasons"] = [f"{proof['type'].replace('_', ' ')} ({proof['span']}) at {proof['page_url']}"] + list(candidate_identity.get("reasons") or [])
+                gated["value"]["discovery"] = {**outcome, "registry_website": url or None, "registry_website_state": website.get("status"), "earlier_attempts": attempts}
+                gated["note"] = (
+                    "Found through the e-mail domain the entity registered in Brønnøysund; published only because the site names this exact legal entity"
+                    if method == "registry_email_domain" else
+                    "Found at a domain spelled like the legal name; published only because the site shows this entity's organisation number or registered phone"
+                )
                 records["website"], crawl, website, identity = gated, candidate, gated, candidate_identity
+                break
+            if gated.get("status") != "available":
+                outcome["reason"] = str(gated.get("note") or gated.get("status"))
+            elif method == "legal_name_domain" and not proof:
+                outcome["reason"] = "site shows neither this entity's organisation number nor its registered phone"
             else:
-                outcome["reason"] = "; ".join(candidate_identity.get("reasons") or []) or str(gated.get("note") or gated.get("status"))
-                if isinstance(website.get("value"), dict):
-                    website["value"]["discovery"] = outcome
-                else:
-                    website["discovery"] = outcome
+                outcome["reason"] = "; ".join(candidate_identity.get("reasons") or [])
+            attempts.append(outcome)
+        if attempts and not exact(website, identity):
+            if isinstance(website.get("value"), dict):
+                website["value"]["discovery_attempts"] = attempts
+            else:
+                website["discovery_attempts"] = attempts
     if website.get("status") == "available" and identity.get("publishable"):
         crawl.record = website
         extra = {}
@@ -104,6 +146,7 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--previous", help="Profiles JSONL from an earlier run; enables change reporting")
     parser.add_argument("--deadline-minutes", type=float, default=0.0, help="After this many minutes remaining companies skip site crawling but still return envelopes (0 = no deadline)")
+    parser.add_argument("--nav-days", type=int, default=45, help="Days of NAV's public vacancy feed to read (0 disables the feed)")
     parser.add_argument("--modules", default=DEFAULT_MODULES)
     args = parser.parse_args()
 
@@ -171,6 +214,7 @@ def main() -> None:
         state = {item["organisation_number"]: item for item in prior if profile_complete_for_modules(item, requested_modules)}
         resumed_profiles = len(state)
     pending_profiles = [profile for profile in profiles if profile["organisation_number"] not in state]
+    nav = NavIndex(days=args.nav_days, now=run_date).start() if args.nav_days > 0 and "hiring" in requested_modules else None
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(enrich, profile): profile["organisation_number"] for profile in pending_profiles}
         for index, future in enumerate(as_completed(futures), 1):
@@ -182,8 +226,15 @@ def main() -> None:
             if index % args.checkpoint_every == 0 or index == len(pending_profiles):
                 write_jsonl(profiles_output, [state[org] for org in orgs if org in state])
 
-    completed_at = utc_now()
     ordered_profiles = [state[org] for org in orgs]
+    nav_report = {"enabled": bool(nav)}
+    if nav:
+        nav.join()
+        postings_by_org = {} if nav.error else nav.postings_for({profile["organisation_number"]: company_keys(profile) for profile in ordered_profiles})
+        for profile in ordered_profiles:
+            merge_nav_postings(profile, postings_by_org.get(profile["organisation_number"], []))
+        nav_report.update({"feed_pages": nav.pages, "active_vacancies_seen": len(nav.active), "companies_with_vacancies": len(postings_by_org), "vacancies": sum(len(rows) for rows in postings_by_org.values()), "error": nav.error})
+    completed_at = utc_now()
     envelopes = []
     change_count = 0
     for profile in ordered_profiles:
@@ -233,9 +284,11 @@ def main() -> None:
             "social_profile_companies": covered("website", lambda record: exact_site(record) and bool((record.get("value") or {}).get("social_links"))),
             "social_profiles": sum(len(((profile["evidence"].get("website") or {}).get("value") or {}).get("social_links") or []) for profile in ordered_profiles),
             "hiring_companies": covered("hiring"),
+            "discovered_sites": covered("website", lambda record: exact_site(record) and bool((record.get("value") or {}).get("discovery"))),
             "news_companies": covered("news"),
             "news_items": sum(len(((profile["evidence"].get("news") or {}).get("value") or {}).get("items") or []) for profile in ordered_profiles),
         },
+        "nav_vacancy_feed": nav_report,
         "refresh": {"compared_with": str(previous_path) if previous_by_org else None, "companies_compared": len(set(previous_by_org) & set(orgs)), "changes": change_count},
         "entrant_errors": sum(len(items) for items in errors.values()),
         "validation": validation,

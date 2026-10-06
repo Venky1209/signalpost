@@ -21,7 +21,8 @@ from norway_company_agent.evidence import evidence  # noqa: E402
 from norway_company_agent.identity import assess_social_identity, assess_website_identity  # noqa: E402
 from norway_company_agent.official import normalize_entity  # noqa: E402
 from norway_company_agent.refresh import diff_profile  # noqa: E402
-from norway_company_agent.site_discovery import email_domain_candidate  # noqa: E402
+from norway_company_agent.nav_jobs import NavIndex, company_keys, name_key  # noqa: E402
+from norway_company_agent.site_discovery import email_domain_candidate, entity_proof, name_domain_candidates  # noqa: E402
 
 
 def soup(markup: str) -> BeautifulSoup:
@@ -124,6 +125,62 @@ class IdentityExtensionTests(unittest.TestCase):
         value = normalize_entity({"epostadresse": "Ola.Nordmann@Firma.NO"})
         self.assertEqual(value["email_domain"], "firma.no")
         self.assertNotIn("Ola", str(value))
+
+
+class _Page:
+    sha256 = "d" * 64
+
+
+def _pages(markup: str) -> dict:
+    return {"https://firma.no/kontakt": (_Page(), markup, soup(markup))}
+
+
+class NameDomainDiscoveryTests(unittest.TestCase):
+    def _profile(self) -> dict:
+        live = normalize_entity({"telefon": "51 68 57 00", "forretningsadresse": {"postnummer": "4306", "poststed": "SANDNES"}})
+        return {"organisation_number": "810034882", "name": "SANDNES ELEKTRISKE AS", "evidence": {"registry_live": {"value": live}}}
+
+    def test_candidates_are_spelled_from_the_full_legal_name(self):
+        self.assertEqual(name_domain_candidates(self._profile(), set()), ["sandneselektriske.no", "sandnes-elektriske.no"])
+        self.assertEqual(name_domain_candidates({"name": "ADV INVEST AS"}, set()), [])
+        self.assertEqual(name_domain_candidates({"name": "BO AS"}, set()), [])
+
+    def test_site_needs_this_entitys_number_phone_or_postcode_and_place(self):
+        profile = self._profile()
+        self.assertEqual(entity_proof(profile, _pages("<p>Org.nr. 810 034 882 MVA</p>"))["type"], "organisation_number_on_site")
+        self.assertEqual(entity_proof(profile, _pages("<p>Ring oss: 51 68 57 00</p>"))["type"], "registered_phone_on_site")
+        self.assertEqual(entity_proof(profile, _pages("<p>Gata 1, 4306 Sandnes</p>"))["type"], "registered_postcode_and_place_on_site")
+        self.assertIsNone(entity_proof(profile, _pages("<p>Org.nr. 999 888 777. Gata 1, 0150 Oslo. Tlf 22 33 44 55</p>")))
+
+
+class NavVacancyTests(unittest.TestCase):
+    def test_vacancy_is_published_only_on_employer_number_match(self):
+        import norway_company_agent.nav_jobs as nav_jobs
+
+        entries = {
+            "u1": {"status": "ACTIVE", "ad_content": {"title": "Elektriker", "published": "2026-10-01T08:00:00+02:00", "applicationDue": "2026-10-20", "link": "https://arbeidsplassen.nav.no/stillinger/stilling/u1", "employer": {"name": "Sandnes Elektriske AS", "orgnr": "973477986"}, "contactList": [{"name": "Ola"}]}},
+            "u2": {"status": "ACTIVE", "ad_content": {"title": "Rørlegger", "employer": {"name": "Sandnes Elektriske AS", "orgnr": "999999999"}}},
+        }
+
+        def fake_json(url, token, extra=None):
+            return entries[url.rsplit("/", 1)[1]], _Page()
+
+        index = NavIndex(days=1)
+        index.active = {"u1": {"title": "Elektriker", "business": "Sandnes Elektriske AS"}, "u2": {"title": "Rørlegger", "business": "SANDNES ELEKTRISKE AS"}, "u3": {"title": "Kokk", "business": "Annet Firma AS"}}
+        original, nav_jobs._json = nav_jobs._json, fake_json
+        try:
+            found = index.postings_for({"810034882": {"names": ["SANDNES ELEKTRISKE AS"], "orgnrs": {"810034882", "973477986"}}})
+        finally:
+            nav_jobs._json = original
+        self.assertEqual(list(found), ["810034882"])
+        self.assertEqual([row["title"] for row in found["810034882"]], ["Elektriker"])
+        self.assertNotIn("Ola", str(found))
+
+    def test_company_keys_include_registered_workplaces(self):
+        profile = {"organisation_number": "810034882", "name": "SANDNES ELEKTRISKE AS", "evidence": {"locations": {"value": {"locations": [{"organisation_number": "973477986", "name": "SANDNES ELEKTRISKE AVD FORUS"}]}}}}
+        keys = company_keys(profile)
+        self.assertEqual(keys["orgnrs"], {"810034882", "973477986"})
+        self.assertEqual(name_key("Sandnes Elektriske AS"), name_key("SANDNES ELEKTRISKE AS"))
 
 
 class EnvelopeTests(unittest.TestCase):

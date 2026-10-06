@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,7 +30,32 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _cache_file(url: str) -> Path | None:
+    directory = os.environ.get("SIGNALPOST_HTTP_CACHE") or ""
+    if not directory:
+        return None
+    digest = hashlib.sha256(("json\n" + url).encode()).hexdigest()
+    return Path(directory) / "registry" / digest[:2] / f"{digest}.json"
+
+
 def fetch_json(url: str, *, timeout: float = 20.0, attempts: int = 5) -> FetchResult:
+    """GET a registry JSON document. SIGNALPOST_HTTP_CACHE replays earlier answers in local development."""
+    cache = _cache_file(url)
+    if cache is not None and cache.exists():
+        try:
+            return FetchResult(**json.loads(cache.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            pass
+    result = _fetch_json(url, timeout=timeout, attempts=attempts)
+    if cache is not None and result.status in {200, 404, 410}:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache.with_suffix(f".{threading.get_ident()}.tmp")
+        temporary.write_text(json.dumps(asdict(result)), encoding="utf-8")
+        temporary.replace(cache)
+    return result
+
+
+def _fetch_json(url: str, *, timeout: float = 20.0, attempts: int = 5) -> FetchResult:
     last_error = "request failed"
     for attempt in range(attempts):
         started = time.monotonic()

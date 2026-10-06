@@ -138,6 +138,9 @@ def _candidate_items(crawl: SiteCrawl, site_domain: str, timeout: float) -> tupl
         for feed_url in signals.feed_links(page_url, soup):
             if feed_url not in feeds:
                 feeds.append(feed_url)
+    if not feeds and "wp-content" in homepage[1]:
+        parsed = urllib.parse.urlparse(homepage[0].final_url)
+        feeds.append(urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/feed/", "", "", "")))
     for feed_url in feeds[:1]:
         if not robots_allowed(feed_url, timeout=timeout):
             continue

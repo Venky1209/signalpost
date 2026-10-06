@@ -31,9 +31,10 @@ companies where every source failed.
 | Legal identity, industry, registered activity, address | Brønnøysund entity register | the organisation number matches |
 | Latest filed accounts and year-on-year change | Regnskapsregisteret | a filed period is returned; missing values are never zero |
 | Role holders, registered workplaces, group links | Brønnøysund | returned by the register |
-| Official website | registry-listed URL, else the domain of the e-mail address the entity registered | the homepage names this exact legal entity or shows its organisation number |
+| Official website | registry-listed URL; else the domain of the e-mail address the entity registered; else a `.no` domain spelled exactly like the legal name | the homepage names this exact legal entity or shows its organisation number. A name-spelled domain also needs the entity's organisation number, registered phone, or registered postcode and place on the site |
 | Social profiles | links and `sameAs` data on the verified site | the handle carries the legal name or the verified site's domain label |
 | Hiring signal | careers page linked from the verified site, plus `JobPosting` data on it | the page's own heading or title names careers or vacancies |
+| Open vacancies | NAV's public vacancy feed (arbeidsplassen.nav.no) | the ad's employer organisation number equals the entity or one of its registered workplaces |
 | Dated news | the site's declared feed or news listing | title and timestamp are both stated on the article page |
 
 A site that loads but cannot be tied to the exact entity is recorded with `publishable: false`, and
@@ -57,11 +58,13 @@ Inside `profile`:
 ## Models, APIs, licences, cost
 
 - No language model and no paid API. No secrets. Third-party cost per official run: **$0**.
-- Sources: Brønnøysund open data (NLOD 2.0) and company-owned websites (robots.txt honoured, one
-  robots read per host, the reference kit's User-Agent; override with `SIGNALPOST_USER_AGENT`).
+- Sources: Brønnøysund open data (NLOD 2.0), NAV's public vacancy feed (read with the public token
+  NAV publishes; contact persons in ads are never stored) and company-owned websites (robots.txt
+  honoured, one robots read per host, the reference kit's User-Agent; override with `SIGNALPOST_USER_AGENT`).
 - Not used: LinkedIn, Meta, Indeed, Glassdoor, Google or any search engine. The optional example
   scripts from the reference kit that touch those services are not imported by the official command.
-- Roughly six requests per company. Local runs: 200 companies in about 2.5 minutes with 16 workers.
+- Roughly seven requests per company, plus about 100 requests for the vacancy feed per run
+  (`--nav-days 0` turns the feed off). A 1,500-company run takes about 20 minutes with 16 workers.
 
 ## Checks
 
