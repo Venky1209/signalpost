@@ -39,6 +39,14 @@ companies where every source failed.
 
 A site that loads but cannot be tied to the exact entity is recorded with `publishable: false`, and
 nothing further is published from it. Parent, brand and property-manager sites fail this gate by design.
+Three further rules came out of a manual audit of 1,500 companies:
+
+- A site that redirects to another registered domain is kept only when that domain is spelled from
+  the legal name; otherwise it is usually a group, chain or platform page.
+- A site the registry did not declare needs the legal name in its title, hostname or structured
+  data (a footer mention is how group sites list subsidiaries), and a one-word legal name also
+  needs the entity's organisation number, registered phone or address on the site.
+- Parked domains and hosting placeholders are never a company website.
 
 ## Output
 

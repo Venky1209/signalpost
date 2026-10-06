@@ -22,7 +22,7 @@ from norway_company_agent.identity import apply_website_identity_gate  # noqa: E
 from norway_company_agent.official import fetch_official_modules  # noqa: E402
 from norway_company_agent.refresh import diff_profile  # noqa: E402
 from norway_company_agent.nav_jobs import SOURCE as NAV_SOURCE, NavIndex, company_keys  # noqa: E402
-from norway_company_agent.site_discovery import NAME_SOURCE_TYPE as NAME_DISCOVERY_SOURCE, SOURCE_TYPE as DISCOVERY_SOURCE, email_domain_candidate, entity_proof, name_domain_candidates, registered_domain  # noqa: E402
+from norway_company_agent.site_discovery import NAME_SOURCE_TYPE as NAME_DISCOVERY_SOURCE, SOURCE_TYPE as DISCOVERY_SOURCE, discovered_site_problem, email_domain_candidate, entity_proof, name_domain_candidates, redirect_problem, registered_domain  # noqa: E402
 from norway_company_agent.site_signals import hiring_record, news_record, unverified_site_records  # noqa: E402
 from norway_company_agent.website import crawl_site, normalize_homepage  # noqa: E402
 
@@ -61,6 +61,21 @@ def merge_nav_postings(profile: dict, postings: list[dict]) -> None:
         )
 
 
+def gate_site(profile: dict, record: dict, requested: str, *, discovered: bool, proof: dict | None = None) -> dict:
+    """Kit identity gate, then the cross-domain redirect rule and (for discovered sites) the stricter bar."""
+    website = apply_website_identity_gate(profile, record)["website"]
+    value = website.get("value") or {}
+    identity = value.get("identity_assessment") or {}
+    if website.get("status") != "available" or not identity.get("publishable"):
+        return website
+    problem = redirect_problem(profile, requested, value) or (discovered_site_problem(profile, value, proof) if discovered else None)
+    if problem:
+        identity.update({"status": "review", "publishable": False, "score": min(float(identity.get("score") or 0), 0.85)})
+        identity["reasons"] = [problem] + list(identity.get("reasons") or [])
+        value["social_links"] = []
+    return website
+
+
 def research_site(profile: dict, requested: list[str], run_date: datetime, crawl_allowed: bool) -> None:
     """Website, then hiring and news only when the site is tied to this exact legal entity."""
     records = profile["evidence"]
@@ -73,7 +88,7 @@ def research_site(profile: dict, requested: list[str], run_date: datetime, crawl
                 records[module] = evidence(module, "blocked", "run_budget", str(url or "https://data.brreg.no/enhetsregisteret/api/enheter"), note=skipped)
         return
     crawl = crawl_site(url)
-    records["website"] = apply_website_identity_gate(profile, crawl.record)["website"]
+    records["website"] = gate_site(profile, crawl.record, str(url or ""), discovered=False)
     website = records["website"]
     identity = (website.get("value") or {}).get("identity_assessment") or {}
 
@@ -88,12 +103,12 @@ def research_site(profile: dict, requested: list[str], run_date: datetime, crawl
         candidates += [(domain, "legal_name_domain", NAME_DISCOVERY_SOURCE) for domain in name_domain_candidates(profile, tried | {email_domain or ""})]
         for domain, method, source_type in candidates:
             candidate = crawl_site(domain, source_type=source_type)
-            gated = apply_website_identity_gate(profile, candidate.record)["website"]
+            proof = entity_proof(profile, candidate.pages) if candidate.pages else None
+            gated = gate_site(profile, candidate.record, domain, discovered=True, proof=proof)
             candidate_identity = (gated.get("value") or {}).get("identity_assessment") or {}
             outcome = {"method": method, "candidate": domain, "accepted": False}
             # A domain merely spelled like the legal name could be a namesake: the site itself must
-            # show this entity's organisation number or registered phone.
-            proof = entity_proof(profile, candidate.pages) if method == "legal_name_domain" and candidate.pages else None
+            # show this entity's organisation number, registered phone, or registered postcode and place.
             if exact(gated, candidate_identity) and (method == "registry_email_domain" or proof):
                 outcome["accepted"] = True
                 if proof:

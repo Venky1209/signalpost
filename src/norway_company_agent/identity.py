@@ -85,7 +85,13 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
         and any(core_compact in _compact(part) for part in homepage_identity_parts if part)
     )
     is_business_sports_club = bool(re.search(r"(?:^|\s)B\.?\s*I\.?\s*L\.?(?:\s|$)", str(profile.get("name") or ""), re.I))
-    if any(marker in normalized_raw for marker in parked_markers):
+    # Placeholder wording is only trusted in the title; in body text the same words describe real work.
+    placeholder_title_markers = (
+        " is parked", "domain parking", "hosted by one.com", "webhosting made simple", "landingpage", "landing page",
+        "coming soon", "kommer snart", "under construction", "under konstruksjon", "default web site page", "website is being built",
+    )
+    normalized_title = unicodedata.normalize("NFKD", str(value.get("title") or "")).encode("ascii", "ignore").decode().casefold()
+    if any(marker in normalized_raw for marker in parked_markers) or any(marker in normalized_title for marker in placeholder_title_markers):
         score = 0.1
         reasons.append("captured page is a parked, for-sale, or generic hosting placeholder")
     elif is_business_sports_club and "bedriftsidrett" not in normalized_candidate_text and "b i l" not in normalized_candidate_text:
@@ -143,7 +149,10 @@ def assess_social_identity(profile: dict[str, Any], link: dict[str, str], site_d
     elif ratio >= 0.75 and len(set(matched)) >= 2:
         score = 0.9
         reason = "most legal-name tokens appear in the social handle"
-    elif len(domain_label) >= 5 and domain_label in handle_compact and domain_label not in GENERIC_DOMAIN_LABELS:
+    elif (
+        len(domain_label) >= 5 and domain_label in handle_compact and domain_label not in GENERIC_DOMAIN_LABELS
+        and core_compact and (domain_label in core_compact or core_compact in domain_label)
+    ):
         score = 0.9
         reason = "social handle carries the verified company site's domain label"
     else:

@@ -10,7 +10,7 @@ from typing import Any
 
 import tldextract
 
-from .identity import _tokens
+from .identity import _compact, _structured_names, _tokens
 
 SOURCE_TYPE = "registry_email_domain_website"
 NAME_SOURCE_TYPE = "legal_name_domain_website"
@@ -94,4 +94,69 @@ def entity_proof(profile: dict[str, Any], pages: dict[str, Any]) -> dict[str, st
             match = pattern.search(text)
             if match:
                 return found("registered_postcode_and_place_on_site", url, digest, match.group(0))
+    return None
+
+
+def name_related_label(profile: dict[str, Any], domain: str) -> bool:
+    """True when a domain's own label is spelled from the legal name (either contains the other)."""
+    core = "".join(_tokens(profile.get("name")))
+    label = str(domain or "").split(".")[0]
+    try:
+        label = label.encode("ascii").decode("idna")  # håkensbakken.no arrives as xn--hkensbakken-...
+    except (UnicodeError, ValueError):
+        pass
+    label = _compact(label)
+    return len(label) >= 4 and len(core) >= 4 and (label in core or core in label)
+
+
+def redirect_problem(profile: dict[str, Any], requested: str, value: dict[str, Any]) -> str | None:
+    """A site that redirects to another registered domain is kept only when that domain carries the legal name.
+
+    Otherwise the landing page is usually a parent group, a chain, or a third-party platform page.
+    """
+    final_domain = registered_domain(_host(value.get("final_url")))
+    if not final_domain or final_domain == registered_domain(_host(requested) or requested):
+        return None
+    if name_related_label(profile, final_domain):
+        return None
+    return f"redirects to {final_domain}, a domain not spelled from the legal name (likely a group, chain or platform page)"
+
+
+def _host(url: Any) -> str:
+    text = str(url or "")
+    if "//" not in text:
+        text = "https://" + text
+    try:
+        from urllib.parse import urlparse
+
+        return urlparse(text).hostname or ""
+    except ValueError:
+        return ""
+
+
+def discovered_site_problem(profile: dict[str, Any], value: dict[str, Any], proof: dict[str, str] | None = None) -> str | None:
+    """Extra bar for a site the registry did not declare: the name must sit in the title, the hostname
+    or structured organisation data (or the organisation number on the homepage), and the page must
+    have real content. A legal name that only appears in a footer or description is not enough —
+    that is how group sites list their subsidiaries.
+    """
+    tokens = _tokens(profile.get("name"))
+    core = set(tokens)
+    compact = "".join(tokens)
+    org = str(profile.get("organisation_number") or "")
+    hostname = _host(value.get("final_url"))
+    strong_parts = [value.get("title"), hostname, *_structured_names(value.get("structured_organisations") or [])]
+    named = any(core and core <= set(_tokens(part)) for part in strong_parts if part) or any(
+        len(compact) >= 6 and compact in _compact(part) for part in strong_parts if part
+    )
+    homepage_text = " ".join(str(value.get(key) or "") for key in ("title", "description", "identity_text_excerpt", "main_text_excerpt"))
+    numbered = any("".join(match.groups()) == org for match in ORG_NUMBER.finditer(homepage_text))
+    # `proof` is this entity's organisation number, registered phone or postcode and place on a fetched page.
+    proven = bool(proof) and name_related_label(profile, registered_domain(hostname))
+    if not (named or numbered or proven):
+        return "the legal name is not in the homepage title, hostname or structured data, and the organisation number is not on the homepage"
+    if len(core) == 1 and not (numbered or proof):
+        return "a one-word legal name on its own cannot separate this entity from a parent or namesake; the site shows no organisation number, registered phone or address"
+    if len(str(value.get("main_text_excerpt") or "").strip()) < 150 and not (numbered or proof):
+        return "the homepage has too little content to be a working company site"
     return None

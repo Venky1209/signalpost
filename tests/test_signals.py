@@ -22,7 +22,7 @@ from norway_company_agent.identity import assess_social_identity, assess_website
 from norway_company_agent.official import normalize_entity  # noqa: E402
 from norway_company_agent.refresh import diff_profile  # noqa: E402
 from norway_company_agent.nav_jobs import NavIndex, company_keys, name_key  # noqa: E402
-from norway_company_agent.site_discovery import email_domain_candidate, entity_proof, name_domain_candidates  # noqa: E402
+from norway_company_agent.site_discovery import discovered_site_problem, email_domain_candidate, entity_proof, name_domain_candidates, redirect_problem  # noqa: E402
 
 
 def soup(markup: str) -> BeautifulSoup:
@@ -106,11 +106,44 @@ class IdentityExtensionTests(unittest.TestCase):
         self.assertFalse(assess_website_identity(row)["publishable"])
 
     def test_social_handle_may_carry_the_verified_site_label(self):
-        profile = {"name": "Norsk Emballasje Holding AS"}
+        profile = {"name": "Elopak Norge AS"}
         link = {"platform": "facebook", "url": "https://facebook.com/elopak"}
         self.assertFalse(assess_social_identity(profile, link)["publishable"])
         self.assertTrue(assess_social_identity(profile, link, "elopak.com")["publishable"])
         self.assertFalse(assess_social_identity(profile, {"platform": "facebook", "url": "https://facebook.com/someoneelse"}, "elopak.com")["publishable"])
+        # A member page on a chain's domain must not hand the chain's profile to the member.
+        chain = {"platform": "facebook", "url": "https://facebook.com/vvseksperten"}
+        self.assertFalse(assess_social_identity({"name": "Dale Rør AS"}, chain, "vvseksperten.no")["publishable"])
+
+    def test_redirect_to_an_unrelated_domain_is_not_the_company_site(self):
+        cabin = {"organisation_number": "999999999", "name": "SOLHEIMSTULEN AS"}
+        self.assertIsNotNone(redirect_problem(cabin, "solheimstulen.no", {"final_url": "https://www.dnt.no/hytter/solheimstulen/"}))
+        self.assertIsNone(redirect_problem(cabin, "solheimstulen.no", {"final_url": "https://www.solheimstulen.no/"}))
+        self.assertIsNone(redirect_problem({"name": "ADMAIORA CONSULTING AS"}, "admaiora-consulting.no", {"final_url": "https://admaiora.no/"}))
+        self.assertIsNone(redirect_problem({"name": "HÅKENSBAKKEN TRANSPORT AS"}, "hakensbakkentransport.no", {"final_url": "https://www.xn--hkensbakkentransport-wzb.no/"}))
+
+    def test_discovered_site_needs_name_in_title_or_host_and_real_content(self):
+        group = {"organisation_number": "999999999", "name": "ULEFOSS KRAFTVERK DA"}
+        text = "Cappelen Gruppen eier og driver skog, kraft og eiendom. " * 10
+        value = {"final_url": "https://www.cho.no/", "title": "Cappelen Gruppen", "identity_text_excerpt": "Ulefoss Kraftverk DA", "main_text_excerpt": text}
+        self.assertIsNotNone(discovered_site_problem(group, value))
+        parked = {"organisation_number": "999999999", "name": "ELVEBAKK MASKIN AS"}
+        self.assertIsNotNone(discovered_site_problem(parked, {"final_url": "https://elvebakkmaskin.as/", "title": "elvebakkmaskin.as", "main_text_excerpt": "x"}))
+        real = {"final_url": "https://www.hydrapipe.no/", "title": "Hydra Pipe AS – totalleverandør", "main_text_excerpt": "Vi leverer rør. " * 20}
+        self.assertIsNone(discovered_site_problem({"organisation_number": "999999999", "name": "HYDRA PIPE AS"}, real))
+        proof = {"type": "registered_phone_on_site", "page_url": "https://accomodo.no/kontakt", "span": "22 33 44 55"}
+        brand = {"final_url": "https://accomodo.no/", "title": "Accomodo - Mer igjen for pengene", "main_text_excerpt": "Regnskap. " * 30}
+        firm = {"organisation_number": "999999999", "name": "ACCOMODO REGNSKAP AS"}
+        self.assertIsNotNone(discovered_site_problem(firm, brand))
+        self.assertIsNone(discovered_site_problem(firm, brand, proof))
+        self.assertIsNotNone(discovered_site_problem(group, value, proof))
+        one_word = {"final_url": "https://www.salmar.no/", "title": "SalMar - Passion for Salmon", "main_text_excerpt": "Laks. " * 60}
+        self.assertIsNotNone(discovered_site_problem({"organisation_number": "999999999", "name": "SALMAR AS"}, one_word))
+
+    def test_parked_and_placeholder_pages_are_not_exact(self):
+        for title in ("jevneholding.no is parked", "Hosted By One.com | Webhosting made simple", ":. Cateno Landingpage .:"):
+            row = {"organisation_number": "999999999", "name": "JEVNE HOLDING AS", "evidence": {"website": {"status": "available", "value": {"title": title, "final_url": "https://jevneholding.no/"}}}}
+            self.assertFalse(assess_website_identity(row)["publishable"], title)
 
     def test_mailbox_providers_are_never_site_candidates(self):
         def profile(address: str) -> dict:
