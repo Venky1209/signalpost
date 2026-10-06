@@ -1,0 +1,9 @@
+.venv/
+out/
+work/
+__pycache__/
+*.pyc
+brreg-*.csv*
+signalpost-universe.jsonl.gz
+.env
+*.tmp
